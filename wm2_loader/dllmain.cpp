@@ -94,23 +94,20 @@ void networkThread(std::string address) {
         FD_SET(s, &readfds);
         if (select(0, &readfds, NULL, NULL, NULL) < 0)
             continue;
-        while (true) {
-            char buf[2048] = { 0 };
-            int size = recv(s, (char*)buf, sizeof(buf), 0);
-            if (size < 0)
-                break;
-            if (size < 5)
-                continue;
-            uint32_t address = *(uint32_t*)buf;
 
-            std::vector<uint8_t> data = {};
-            data.resize(size - sizeof(uint32_t));
-            memcpy(data.data(), buf + sizeof(uint32_t), data.size());
+        char buf[2048] = { 0 };
+        int size = recv(s, (char*)buf, sizeof(buf), 0);
+        if (size < 5)
+            continue;
+        uint32_t address = *(uint32_t*)buf;
 
-            recvBufferMutex.lock();
-            recvBuffer[address] = data;
-            recvBufferMutex.unlock();
-        }
+        std::vector<uint8_t> data = {};
+        data.resize(size - sizeof(uint32_t));
+        memcpy(data.data(), buf + sizeof(uint32_t), data.size());
+
+        recvBufferMutex.lock();
+        recvBuffer[address] = data;
+        recvBufferMutex.unlock();
     }
 }
 
