@@ -2,12 +2,13 @@
 #include <Windows.h>
 #include <cstdint>
 #include <iostream>
-#include <MinHook.h>
+#include "include/MinHook.h"
 #include <vector>
 #include <unordered_map>
 #include <thread>
 #include <mutex>
-#include <toml.hpp>
+#include "include/toml.hpp"
+#include <cstdlib>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -136,6 +137,32 @@ int __stdcall jmp_MbRecvPacket(uint32_t address, void* data, int length) {
     return 0;
 }
 
+void __stdcall jmp_SetNetworkMode(int mode) {
+    (void)mode; // 1 = recv 2 = send
+}
+
+_declspec(naked) void jmp_SendNetworkPackets(/*void* a1, uint8_t* data*/) {
+    __asm {
+        ret 0x04
+    }
+}
+
+_declspec(naked) void jmp_RecvNetworkPackets(/*void* a1, uint8_t* data, uint8_t a3*/) {
+    __asm {
+        mov eax, 1 // Report as invalid checksum (for now)
+        ret 0x08
+    }
+}
+
+// Probably doesn't even work at all lmao
+extern "C" {
+    // NVIDIA Optimus
+    __declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
+
+    // AMD Switchable Graphics
+    __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+}
+
 BOOL APIENTRY DllMain(HMODULE hModule,
     DWORD  ul_reason_for_call,
     LPVOID lpReserved
@@ -144,9 +171,10 @@ BOOL APIENTRY DllMain(HMODULE hModule,
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH: {
-        if (*(uint32_t*)0x55c80 != 69485707) // simple check if v322
-            break;
 
+        MH_Initialize();
+
+        // Read Config
         toml::table config;
         try
         {
@@ -157,30 +185,165 @@ BOOL APIENTRY DllMain(HMODULE hModule,
             printf("Error parsing config.toml: %s\n", err.what());
         }
 
+        // Network
         if (config["network"].is_table())
         {
             auto configNetwork = config["network"];
-            if (configNetwork["enabled"].is_boolean() && configNetwork["enabled"].as_boolean()->get() && configNetwork["local_ip"].is_string()) {
+            if (configNetwork["enabled"].is_boolean() && configNetwork["enabled"].as_boolean()->get() && configNetwork["local_ip"].is_string())
+            {
                 std::thread net(networkThread, configNetwork["local_ip"].as_string()->get());
                 net.detach();
             }
         }
 
-        MH_Initialize();
+        // CPU Affinity
+        if (config["affinity"].is_table())
+        {
+            HANDLE process = GetCurrentProcess();
 
-        // Network
-        Patch((void*)0x55c80, { 0xc2, 0x04, 0x00 }); // ret 4
-        MH_CreateHook((void*)0x11a9c0, jmp_MbSendPacket, NULL);
-        MH_CreateHook((void*)0x11a8b0, jmp_MbRecvPacket, NULL);
+            auto configAffinity = config["affinity"];
+            if (configAffinity["enabled"].is_boolean() && configAffinity["enabled"].as_boolean()->get())
+            {
+                // Set CPU Affinity to CPU 0 and 1 (binary: 00000011)
+                DWORD_PTR affinityMask = 0b11;
 
-        // Link OK
-        Patch((void*)0x11abd0, { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xc2, 0x0c, 0x00 }); // mov eax, 1 - ret 12
-        Patch((void*)0x5672a, { 0xB8, 0x01, 0x00, 0x00, 0x00 }); // mov eax, 1
-        Patch((void*)0x5673c, { 0xB8, 0x00, 0x00, 0x00, 0x00 }); // mov eax, 0
+                if (SetProcessAffinityMask(process, affinityMask))
+                {
+                    printf("[0x6969] DEBUG: INIT    CPU Affinity set to CPU 0 and CPU 1\n");
+                }
+            }
+            else
+            {
+                // Set affinity to use all available processors
+                DWORD_PTR processAffinityMask;
+                DWORD_PTR systemAffinityMask;
 
-        // Disable mediaboard type 3 check
-        Patch((void*)0x11edb8, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
-        Patch((void*)0x11edda, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+                if (GetProcessAffinityMask(process, &processAffinityMask, &systemAffinityMask))
+                {
+                    if (SetProcessAffinityMask(process, systemAffinityMask))
+                    {
+                        printf("[0x6969] DEBUG: INIT    CPU Affinity set to all available processors (0x%llX)\n", systemAffinityMask);
+                    }
+                }
+            }
+        }
+
+        // simple check if v322 ver b
+        if (*(uint32_t*)0x55C80 == 69485707)
+        {
+            printf("[0x6969] DEBUG: INIT    V322 ");
+
+            // Network
+            Patch((void*)0x55C80, { 0xc2, 0x04, 0x00 }); // ret 4
+
+            // Link OK
+            Patch((void*)0x5672A, { 0xB8, 0x01, 0x00, 0x00, 0x00 }); // mov eax, 1
+            Patch((void*)0x5673C, { 0xB8, 0x00, 0x00, 0x00, 0x00 }); // mov eax, 0
+
+            // v322 exp ver b
+            if (*(uint32_t*)0x11A9C0 == 2366172291)
+            {
+                printf("EXP Ver. B Detected!\n");
+
+                // Network
+                MH_CreateHook((void*)0x11A9C0, jmp_MbSendPacket, NULL);
+                MH_CreateHook((void*)0x11A8B0, jmp_MbRecvPacket, NULL);
+
+                // Link OK
+                Patch((void*)0x11ABD0, { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xc2, 0x0c, 0x00 }); // mov eax, 1 - ret 12
+
+                // Disable mediaboard type 3 check
+                Patch((void*)0x11EDB8, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+                Patch((void*)0x11EDDA, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+            }
+            // v322 jp ver b
+            else if (*(uint32_t*)0x11AAB0 == 2366172291)
+            {
+                printf("JPN Ver. B Detected!\n");
+
+                // Network
+                MH_CreateHook((void*)0x11AAB0, jmp_MbSendPacket, NULL);
+                MH_CreateHook((void*)0x11A9A0, jmp_MbRecvPacket, NULL);
+
+                // Link OK
+                Patch((void*)0x11ACC0, { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xc2, 0x0c, 0x00 }); // mov eax, 1 - ret 12
+
+                // Disable mediaboard type 3 check
+                Patch((void*)0x11EEA8, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+                Patch((void*)0x11EECA, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+            }
+        }
+        // simple check if v322 jp ver a
+        else if (*(uint32_t*)0x55C10 == 69485707)
+        {
+            printf("[0x6969] DEBUG: INIT    V322 ");
+            printf("JPN Ver. A Detected!\n");
+
+            // Network
+            Patch((void*)0x55C10, { 0xc2, 0x04, 0x00 }); // ret 4
+            MH_CreateHook((void*)0x11AB20, jmp_MbSendPacket, NULL);
+            MH_CreateHook((void*)0x11AA10, jmp_MbRecvPacket, NULL);
+
+            // Link OK
+            Patch((void*)0x11AD20, { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xc2, 0x0c, 0x00 }); // mov eax, 1 - ret 12
+            Patch((void*)0x566BA, { 0xB8, 0x01, 0x00, 0x00, 0x00 }); // mov eax, 1
+            Patch((void*)0x566CC, { 0xB8, 0x00, 0x00, 0x00, 0x00 }); // mov eax, 0
+
+            // Disable mediaboard type 3 check
+            Patch((void*)0x11EF08, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+            Patch((void*)0x11EF2A, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+        }
+        // simple check if v307 exp ver a
+        else if (*(uint32_t*)0x6F280 == 69485707)
+        {
+            printf("[0x6969] DEBUG: INIT    V307 ");
+            printf("EXP Ver. A Detected!\n");
+
+            // Network
+            Patch((void*)0x6F280, { 0xc2, 0x04, 0x00 });
+            MH_CreateHook((void*)0xB2B80, jmp_MbSendPacket, NULL);
+            MH_CreateHook((void*)0xB2BD0, jmp_MbRecvPacket, NULL);
+            /*MH_CreateHook((void*)0x6F280, jmp_SetNetworkMode, NULL);
+            MH_CreateHook((void*)0x6F2A0, jmp_SendNetworkPackets, NULL);
+            MH_CreateHook((void*)0x6F320, jmp_RecvNetworkPackets, NULL);*/
+
+            // Link OK
+            Patch((void*)0xB2D80, { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xc2, 0x0c, 0x00 }); // mov eax, 1 - ret 12
+            //Patch((void*)0x, { 0xB8, 0x01, 0x00, 0x00, 0x00 }); // mov eax, 1
+            //Patch((void*)0x, { 0xB8, 0x00, 0x00, 0x00, 0x00 }); // mov eax, 0
+
+            // Disable mediaboard type 3 check
+            Patch((void*)0xB6F98, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+            Patch((void*)0xB6FBA, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+        }
+        // simple check if v307 jp ver a
+        else if (*(uint32_t*)0x6F2B0 == 69485707)
+        {
+            printf("[0x6969] DEBUG: INIT    V307 ");
+            printf("JPN Ver. A Detected!\n");
+
+            // Network
+            Patch((void*)0x6F2B0, { 0xc2, 0x04, 0x00 });
+            MH_CreateHook((void*)0xB2BB0, jmp_MbSendPacket, NULL);
+            MH_CreateHook((void*)0xB2C00, jmp_MbRecvPacket, NULL);
+            /*MH_CreateHook((void*)0x6F2B0, jmp_SetNetworkMode, NULL);
+            MH_CreateHook((void*)0x6F2D0, jmp_SendNetworkPackets, NULL);
+            MH_CreateHook((void*)0x6F350, jmp_RecvNetworkPackets, NULL);*/
+
+            // Link OK
+            Patch((void*)0xB2DB0, { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xc2, 0x0c, 0x00 }); // mov eax, 1 - ret 12
+            //Patch((void*)0x, { 0xB8, 0x01, 0x00, 0x00, 0x00 }); // mov eax, 1
+            //Patch((void*)0x, { 0xB8, 0x00, 0x00, 0x00, 0x00 }); // mov eax, 0
+
+            // Disable mediaboard type 3 check
+            Patch((void*)0xB6FC8, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+            Patch((void*)0xB6FEA, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+        }
+        // unknown version
+        else
+        {
+            printf("[0x6969] DEBUG: INIT    Unknown Version\n");
+        }
 
         MH_EnableHook(NULL);
         break;
