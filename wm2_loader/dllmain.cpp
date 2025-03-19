@@ -179,6 +179,7 @@ BOOL APIENTRY DllMain(HMODULE hModule,
         try
         {
             config = toml::parse_file("config.toml");
+            printf("[0x6969] DEBUG: INIT    Config Loaded\n");
         }
         catch (const toml::parse_error& err)
         {
