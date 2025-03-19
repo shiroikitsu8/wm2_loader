@@ -274,25 +274,50 @@ BOOL APIENTRY DllMain(HMODULE hModule,
                 Patch((void*)0x11EECA, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
             }
         }
-        // simple check if v322 jp ver a
+        // simple check if v322 ver a
         else if (*(uint32_t*)0x55C10 == 69485707)
         {
             printf("[0x6969] DEBUG: INIT    V322 ");
-            printf("JPN Ver. A Detected!\n");
-
+            
             // Network
             Patch((void*)0x55C10, { 0xc2, 0x04, 0x00 }); // ret 4
-            MH_CreateHook((void*)0x11AB20, jmp_MbSendPacket, NULL);
-            MH_CreateHook((void*)0x11AA10, jmp_MbRecvPacket, NULL);
 
             // Link OK
-            Patch((void*)0x11AD20, { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xc2, 0x0c, 0x00 }); // mov eax, 1 - ret 12
             Patch((void*)0x566BA, { 0xB8, 0x01, 0x00, 0x00, 0x00 }); // mov eax, 1
             Patch((void*)0x566CC, { 0xB8, 0x00, 0x00, 0x00, 0x00 }); // mov eax, 0
 
-            // Disable mediaboard type 3 check
-            Patch((void*)0x11EF08, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
-            Patch((void*)0x11EF2A, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+            // v322 exp ver a
+            if (*(uint32_t*)0x11A950 == 2366172291)
+            {
+                printf("EXP Ver. A Detected!\n");
+
+                // Network
+                MH_CreateHook((void*)0x11A950, jmp_MbSendPacket, NULL);
+                MH_CreateHook((void*)0x11A840, jmp_MbRecvPacket, NULL);
+
+                // Link OK
+                Patch((void*)0x11AB50, { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xc2, 0x0c, 0x00 }); // mov eax, 1 - ret 12
+
+                // Disable mediaboard type 3 check
+                Patch((void*)0x11ED38, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+                Patch((void*)0x11ED5A, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+            }
+            // v322 jp ver a
+            else if (*(uint32_t*)0x11AB20 == 2366172291)
+            {
+                printf("JPN Ver. A Detected!\n");
+
+                // Network
+                MH_CreateHook((void*)0x11AB20, jmp_MbSendPacket, NULL);
+                MH_CreateHook((void*)0x11AA10, jmp_MbRecvPacket, NULL);
+
+                // Link OK
+                Patch((void*)0x11AD20, { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xc2, 0x0c, 0x00 }); // mov eax, 1 - ret 12
+
+                // Disable mediaboard type 3 check
+                Patch((void*)0x11EF08, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+                Patch((void*)0x11EF2A, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+            }
         }
         // simple check if v307 exp ver a
         else if (*(uint32_t*)0x6F280 == 69485707)
