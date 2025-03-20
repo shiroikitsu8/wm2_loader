@@ -1,14 +1,16 @@
-#include <winsock.h>
+﻿#include <winsock.h>
 #include <Windows.h>
 #include <cstdint>
 #include <iostream>
-#include "include/MinHook.h"
 #include <vector>
 #include <unordered_map>
 #include <thread>
 #include <mutex>
-#include "include/toml.hpp"
 #include <cstdlib>
+#include <fstream>
+#include <filesystem>
+#include "include/MinHook.h"
+#include "include/toml.hpp"
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -137,23 +139,6 @@ int __stdcall jmp_MbRecvPacket(uint32_t address, void* data, int length) {
     return 0;
 }
 
-void __stdcall jmp_SetNetworkMode(int mode) {
-    (void)mode; // 1 = recv 2 = send
-}
-
-_declspec(naked) void jmp_SendNetworkPackets(/*void* a1, uint8_t* data*/) {
-    __asm {
-        ret 0x04
-    }
-}
-
-_declspec(naked) void jmp_RecvNetworkPackets(/*void* a1, uint8_t* data, uint8_t a3*/) {
-    __asm {
-        mov eax, 1 // Report as invalid checksum (for now)
-        ret 0x08
-    }
-}
-
 // Probably doesn't even work at all lmao
 extern "C" {
     // NVIDIA Optimus
@@ -162,6 +147,53 @@ extern "C" {
     // AMD Switchable Graphics
     __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 }
+
+// Read Config
+static toml::table readConfig()
+{
+    std::filesystem::path filename = "config.toml";
+    toml::table config;
+
+    // Generate default config if it doesn't exist
+    if (!std::filesystem::exists(filename))
+    {
+        printf("[0x6969] DEBUG: INIT    Generating default config...\n");
+
+        config.emplace("network", toml::table{
+            { "enabled", false },
+            { "local_ip", "127.0.0.1" }
+        });
+        config.emplace("affinity", toml::table{
+            { "enabled", false }
+        });
+
+        std::ofstream file(filename);
+        if (file)
+        {
+            file << config;
+        }
+        else
+        {
+            printf("Error opening %s for writing\n", filename.string().c_str());
+            std::exit(1);
+        }
+    }
+    
+    // Read it
+    try
+    {
+        config = toml::parse_file(filename.string());
+        printf("[0x6969] DEBUG: INIT    Config loaded\n");
+    }
+    catch (const toml::parse_error& err)
+    {
+        printf("Error parsing config.toml: %s\n", err.what());
+        std::exit(1);
+    }
+
+    return config;
+}
+
 
 BOOL APIENTRY DllMain(HMODULE hModule,
     DWORD  ul_reason_for_call,
@@ -175,16 +207,7 @@ BOOL APIENTRY DllMain(HMODULE hModule,
         MH_Initialize();
 
         // Read Config
-        toml::table config;
-        try
-        {
-            config = toml::parse_file("config.toml");
-            printf("[0x6969] DEBUG: INIT    Config Loaded\n");
-        }
-        catch (const toml::parse_error& err)
-        {
-            printf("Error parsing config.toml: %s\n", err.what());
-        }
+        toml::table config = readConfig();
 
         // Network
         if (config["network"].is_table())
@@ -329,14 +352,9 @@ BOOL APIENTRY DllMain(HMODULE hModule,
             Patch((void*)0x6F280, { 0xc2, 0x04, 0x00 });
             MH_CreateHook((void*)0xB2B80, jmp_MbSendPacket, NULL);
             MH_CreateHook((void*)0xB2BD0, jmp_MbRecvPacket, NULL);
-            /*MH_CreateHook((void*)0x6F280, jmp_SetNetworkMode, NULL);
-            MH_CreateHook((void*)0x6F2A0, jmp_SendNetworkPackets, NULL);
-            MH_CreateHook((void*)0x6F320, jmp_RecvNetworkPackets, NULL);*/
 
             // Link OK
             Patch((void*)0xB2D80, { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xc2, 0x0c, 0x00 }); // mov eax, 1 - ret 12
-            //Patch((void*)0x, { 0xB8, 0x01, 0x00, 0x00, 0x00 }); // mov eax, 1
-            //Patch((void*)0x, { 0xB8, 0x00, 0x00, 0x00, 0x00 }); // mov eax, 0
 
             // Disable mediaboard type 3 check
             Patch((void*)0xB6F98, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
@@ -352,14 +370,9 @@ BOOL APIENTRY DllMain(HMODULE hModule,
             Patch((void*)0x6F2B0, { 0xc2, 0x04, 0x00 });
             MH_CreateHook((void*)0xB2BB0, jmp_MbSendPacket, NULL);
             MH_CreateHook((void*)0xB2C00, jmp_MbRecvPacket, NULL);
-            /*MH_CreateHook((void*)0x6F2B0, jmp_SetNetworkMode, NULL);
-            MH_CreateHook((void*)0x6F2D0, jmp_SendNetworkPackets, NULL);
-            MH_CreateHook((void*)0x6F350, jmp_RecvNetworkPackets, NULL);*/
 
             // Link OK
             Patch((void*)0xB2DB0, { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xc2, 0x0c, 0x00 }); // mov eax, 1 - ret 12
-            //Patch((void*)0x, { 0xB8, 0x01, 0x00, 0x00, 0x00 }); // mov eax, 1
-            //Patch((void*)0x, { 0xB8, 0x00, 0x00, 0x00, 0x00 }); // mov eax, 0
 
             // Disable mediaboard type 3 check
             Patch((void*)0xB6FC8, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
