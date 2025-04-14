@@ -236,20 +236,6 @@ BOOL APIENTRY DllMain(HMODULE hModule,
                     printf("[0x6969] DEBUG: INIT    CPU Affinity set to CPU 0 and CPU 1\n");
                 }
             }
-            else
-            {
-                // Set affinity to use all available processors
-                DWORD_PTR processAffinityMask;
-                DWORD_PTR systemAffinityMask;
-
-                if (GetProcessAffinityMask(process, &processAffinityMask, &systemAffinityMask))
-                {
-                    if (SetProcessAffinityMask(process, systemAffinityMask))
-                    {
-                        printf("[0x6969] DEBUG: INIT    CPU Affinity set to all available processors (0x%llX)\n", systemAffinityMask);
-                    }
-                }
-            }
         }
 
         // simple check if v322 ver b
